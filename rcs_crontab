@@ -32,7 +32,8 @@ CRONTAB_DIR = '/var/tmp/crontabs'
 CRONTAB_CMD = ['/usr/bin/crontab']
 
 # checkout and lock (otherwise it's read-only)
-# -q (quiet). This is always run with a checkin, so the output here is just noise
+# -q (quiet). This is always run with a checkin, so the output here is just
+# noise
 CO_CMD = ['/usr/bin/co', '-l', '-q']
 
 # checkin and unlock (otherwise it dissappears)
@@ -42,8 +43,8 @@ CI_CMD = ['/usr/bin/ci', '-u', '-t-cron']
 def UserRequestedExit(Exception):
     pass
 
-def install(file, user=None):
-    return_code = Popen(CRONTAB_CMD+[file]).wait()
+def install(cron_file, user=None):
+    return_code = Popen(CRONTAB_CMD+[cron_file]).wait()
     if return_code == 0:
         current_crontab = get_current_crontab()
         commit_to_rcs_crontab(current_crontab)
@@ -65,8 +66,8 @@ def edit(user=None):
 
 def check_if_rcs_crontab_is_used():
     '''
-    Checks if rcs_crontab is used.  Asks if you want to use it. Reads and returns
-    rcs_crontab if used.
+    Checks if rcs_crontab is used.  Asks if you want to use it. Reads and
+    returns rcs_crontab if used.
     '''
     rcs_crontab_file = get_rcs_crontab_file()
     current_rcs_crontab = None
@@ -88,16 +89,17 @@ def check_if_rcs_crontab_is_used():
 def check_if_out_of_sync(current_rcs_crontab, current_crontab):
     """
     Makes sure that rcs_crontab and current_crontab are in sync.
-    If crontab is empty and something is in rcs_crontab it asks if you want to install that.
-    If both aren't empty and differ it asks if you want to commit crontab to rcs_crontab.
-    Committing differences is necessary if you want to continue.
+    If crontab is empty and something is in rcs_crontab it asks if you want to
+    install that. If both aren't empty and differ it asks if you want to
+    commit crontab to rcs_crontab. Committing differences is necessary if you
+    want to continue.
     """
     if current_crontab is None and \
        current_rcs_crontab is not None:
 
             response = raw_input("Your crontab is empty, but there's something in rcs_crontab. Would you like to install that? ")
-            # empty response or anything starting with Y is good enough to continue
-            # otherwise bail
+            # Empty response or anything starting with Y is good enough to
+            # continue. Otherwise bail.
             if response and not response.lower().startswith('y'):
                 return
             # Install rcs_crontab_file
@@ -108,8 +110,8 @@ def check_if_out_of_sync(current_rcs_crontab, current_crontab):
        not current_crontab == current_rcs_crontab:
 
             response = raw_input("Your crontab was changed without rcs_crontab. Would you like to add changes to rcs_crontab (required to continue)? ")
-            # empty response or anything starting with Y is good enough to continue
-            # otherwise bail
+            # Empty response or anything starting with Y is good enough to
+            # continue. Otherwise bail
             if response and not response.lower().startswith('y'):
                 raise UserRequestedExit("Doesn't want to resolve discrepancy")
             commit_to_rcs_crontab(current_crontab)
@@ -132,8 +134,8 @@ def edit_crontab_and_commit():
 
 def commit_to_rcs_crontab(contents):
     """
-    Commits "contents" to rc_crontab.  Creates necessary directories, locks/unlocks if necessary,
-    and prompts user for commit message.
+    Commits "contents" to rc_crontab.  Creates necessary directories,
+    locks/unlocks if necessary, and prompts user for commit message.
     """
     rcs_crontab_file = get_rcs_crontab_file(mkdirs=True)
     if os.path.exists(rcs_crontab_file):
