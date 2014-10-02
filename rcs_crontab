@@ -1,0 +1,192 @@
+#!/usr/bin/env python
+
+"""
+Usage:
+    crontab [-u user] <file>
+    crontab [-u user] [ -e | -l | -r ]
+
+Arguments:
+    file     destination path
+
+Options:
+    -u user  the username to use
+    -e       edit user's crontab
+    -l       list user's crontab
+    -r       delete user's crontab
+    -i       prompt before deleting user's crontab
+    -s       selinux context
+"""
+
+import os
+import sys
+import stat
+import docopt
+import socket
+from getpass import getuser
+from subprocess import Popen, PIPE
+
+# This is a terrible place for them
+# Point to a network accessable location
+CRONTAB_DIR = '/var/tmp/crontabs'
+
+# TODO: hard-coded paths? Implement "which" to look them up.
+CRONTAB_CMD = ['/usr/bin/crontab']
+
+# checkout and lock (otherwise it's read-only)
+# -q (quiet). Always run with a checkin, so the output here is just noise
+CO_CMD = ['/usr/bin/co', '-l', '-q']
+
+# checkin and unlock (otherwise it dissappears)
+# -t gives a default description when adding (otherwise it prompts for it)
+CI_CMD = ['/usr/bin/ci', '-u', '-t-cron']
+
+def UserRequestedExit(Exception):
+    pass
+
+def main(user=None):
+    current_rcs_crontab = check_if_rcs_crontab_is_used()
+
+    current_crontab = get_current_crontab()
+
+    check_if_out_of_sync(current_rcs_crontab, current_crontab)
+
+    edit_crontab_and_commit()
+
+def check_if_rcs_crontab_is_used():
+    '''
+    Checks if rcs_crontab is used.  Asks if you want to use it. Reads and returns
+    rcs_crontab if used.
+    '''
+    rcs_crontab_file = get_rcs_crontab_file()
+    current_rcs_crontab = None
+    if not os.path.exists(rcs_crontab_file):
+        response = raw_input("You're not using rcs_crontab! Would you like to? ")
+        # empty response or anything starting with Y is good enough to continue
+        # otherwise bail
+        if response and not response.lower().startswith('y'):
+            raise UserRequestedExit("Doesn't want to use rcs_crontab")
+    else:
+        try:
+            # TODO: better error handling if problems reading file?
+            with open(rcs_crontab_file, 'r') as fh:
+                current_rcs_crontab = fh.readlines()
+        except:
+            pass
+    return current_rcs_crontab
+
+def check_if_out_of_sync(current_rcs_crontab, current_crontab):
+    """
+    Makes sure that rcs_crontab and current_crontab are in sync.
+    If crontab is empty and something is in rcs_crontab it asks if you want to install that.
+    If both aren't empty and differ it asks if you want to commit crontab to rcs_crontab.
+    Committing differences is necessary if you want to continue.
+    """
+    if current_crontab is None and \
+       current_rcs_crontab is not None:
+
+            response = raw_input("Your crontab is empty, but there's something in rcs_crontab. Would you like to install that? ")
+            # empty response or anything starting with Y is good enough to continue
+            # otherwise bail
+            if response and not response.lower().startswith('y'):
+                return
+            # Install rcs_crontab_file
+            Popen(CRONTAB_CMD+[get_rcs_crontab_file()]).wait()
+
+    elif current_crontab is not None and \
+       current_rcs_crontab is not None and \
+       not current_crontab == current_rcs_crontab:
+
+            response = raw_input("Your crontab was changed without rcs_crontab. Would you like to add changes to rcs_crontab (required to continue)? ")
+            # empty response or anything starting with Y is good enough to continue
+            # otherwise bail
+            if response and not response.lower().startswith('y'):
+                raise UserRequestedExit("Doesn't want to resolve discrepancy")
+            commit_to_rcs_crontab(current_crontab)
+
+def edit_crontab_and_commit():
+    """
+    Edit your crontab.  Commit changes to rcs_crontab.
+    """
+    # stdout=PIPE hangs the process
+    proc = Popen(CRONTAB_CMD+['-e'], stderr=PIPE)
+    stderr = proc.stderr.readlines()
+    sys.stderr.writelines(stderr)
+    return_code = proc.wait()
+    if return_code == 0 and \
+            'no changes made to crontab' not in ''.join(stderr):
+        current_crontab = get_current_crontab()
+        commit_to_rcs_crontab(current_crontab)
+    # Don't worry about non-zero exit code. The program is finished anyway.
+
+
+def commit_to_rcs_crontab(contents):
+    """
+    Commits "contents" to rc_crontab.  Creates necessary directories, locks/unlocks if necessary,
+    and prompts user for commit message.
+    """
+    rcs_crontab_file = get_rcs_crontab_file(mkdirs=True)
+    if os.path.exists(rcs_crontab_file):
+        # TODO: assumed to be locked?  What about race conditions?
+        # could CTRL-C
+        Popen(CO_CMD + [rcs_crontab_file]).wait()
+    with open(rcs_crontab_file, 'w') as fh:
+        fh.writelines(contents)
+    Popen(CI_CMD+[rcs_crontab_file]).wait()
+
+def get_rcs_crontab_file(mkdirs=False):
+    """
+    Returns the path where the rcs_crontab should be saved for the current
+    host and user. If mkdirs is True, creates necessary directories with
+    necessary permissions (but does not create file).
+    """
+    hostname = socket.getfqdn(socket.gethostname())
+    username = getuser()
+    crontab_file = os.path.join(CRONTAB_DIR, hostname, username + '.cron')
+    if mkdirs:
+        # Testing and creating separately just to be sure these dirs have
+        # permissons for other users to write to.
+        if not os.path.exists(CRONTAB_DIR):
+            os.makedirs(CRONTAB_DIR, 0777)
+        dirname = os.path.join(CRONTAB_DIR, hostname)
+        if not os.path.exists(dirname):
+            os.mkdir(dirname, 0777)
+        # an RCS folder puts all revisions inside there
+        # it's just tidier
+        dirname = os.path.join(CRONTAB_DIR, hostname, 'RCS')
+        if not os.path.exists(dirname):
+            os.mkdir(dirname, 0777)
+    return crontab_file
+
+
+def get_current_crontab():
+    """
+    Returns the contents of crontab for the user.  If no crontab is
+    present None is returned.  If an error is returned
+    (for reasons other than a missing crontab), the message is printed
+    to stderr and process is exited.
+    """
+    cmd = CRONTAB_CMD + ['-l']
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE)
+    stderr = proc.stderr.readlines()
+    if ''.join(stderr).startswith("no crontab for"):
+        return None
+
+    return_code = proc.wait()
+
+    if return_code:
+        sys.stderr.writelines(stderr)
+        raise RuntimeError("crontab had non-zero exit code")
+
+    return proc.stdout.readlines()
+
+if __name__ == '__main__':
+    args = docopt.docopt(__doc__)
+    # TODO: add support for -u
+    if args['-e']:
+        try:
+            main()
+        except UserRequestedExit:
+            sys.exit(1)
+    else:
+        Popen(CRONTAB_CMD + sys.argv[1:]).wait()
+
