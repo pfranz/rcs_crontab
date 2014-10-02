@@ -19,7 +19,6 @@ Options:
 
 import os
 import sys
-import stat
 import docopt
 import socket
 from getpass import getuser
@@ -33,7 +32,7 @@ CRONTAB_DIR = '/var/tmp/crontabs'
 CRONTAB_CMD = ['/usr/bin/crontab']
 
 # checkout and lock (otherwise it's read-only)
-# -q (quiet). Always run with a checkin, so the output here is just noise
+# -q (quiet). This is always run with a checkin, so the output here is just noise
 CO_CMD = ['/usr/bin/co', '-l', '-q']
 
 # checkin and unlock (otherwise it dissappears)
@@ -43,7 +42,19 @@ CI_CMD = ['/usr/bin/ci', '-u', '-t-cron']
 def UserRequestedExit(Exception):
     pass
 
-def main(user=None):
+def install(file, user=None):
+    return_code = Popen(CRONTAB_CMD+[file]).wait()
+    if return_code == 0:
+        current_crontab = get_current_crontab()
+        commit_to_rcs_crontab(current_crontab)
+
+def remove(user=None):
+    return_code = Popen(CRONTAB_CMD+['-r']).wait()
+    if return_code == 0:
+        current_crontab = get_current_crontab()
+        commit_to_rcs_crontab(current_crontab)
+
+def edit(user=None):
     current_rcs_crontab = check_if_rcs_crontab_is_used()
 
     current_crontab = get_current_crontab()
@@ -182,11 +193,16 @@ def get_current_crontab():
 if __name__ == '__main__':
     args = docopt.docopt(__doc__)
     # TODO: add support for -u
-    if args['-e']:
-        try:
-            main()
-        except UserRequestedExit:
-            sys.exit(1)
-    else:
-        Popen(CRONTAB_CMD + sys.argv[1:]).wait()
+    try:
+        if args['<file>'] is not None:
+            install(args['<file>'])
+        elif args['-e']:
+            edit()
+        elif args['-r']:
+            remove()
+        else:
+            # such as -l
+            Popen(CRONTAB_CMD + sys.argv[1:]).wait()
+    except UserRequestedExit:
+        sys.exit(1)
 
